@@ -1,0 +1,62 @@
+application {
+    config {
+        baseName orderService
+        applicationType microservice
+        packageName cz.ordersystem.order
+        serviceDiscoveryType consul
+        authenticationType jwt
+        serverPort 8081
+        prodDatabaseType postgresql
+        devDatabaseType postgresql
+        messageBroker kafka
+        enableSwaggerCodegen true
+    }
+    entities Order, OrderItem, OutboxMessage
+}
+
+enum OrderStatus {
+    PENDING,
+    STOCK_RESERVED,
+    PAYMENT_PENDING,
+    CONFIRMED,
+    CANCELLED
+}
+
+entity Order {
+    customerId      UUID         required
+    status          OrderStatus  required
+    totalAmount     BigDecimal   required min(0)
+    currency        String       required maxlength(3)
+    street          String       required maxlength(255)
+    city            String       required maxlength(100)
+    postalCode      String       required maxlength(20)
+    country         String       required maxlength(100)
+    createdAt       Instant      required
+    updatedAt       Instant
+}
+
+entity OrderItem {
+    productId       UUID         required
+    productName     String       required maxlength(255)
+    quantity        Integer      required min(1)
+    unitPrice       BigDecimal   required min(0)
+    currency        String       required maxlength(3)
+}
+
+entity OutboxMessage {
+    aggregateType   String       required maxlength(100)
+    aggregateId     String       required maxlength(100)
+    eventType       String       required maxlength(100)
+    payload         TextBlob     required
+    published       Boolean      required
+    createdAt       Instant      required
+}
+
+relationship OneToMany {
+    Order{items} to OrderItem{order required}
+}
+
+dto Order, OrderItem with mapstruct
+service Order with serviceImpl
+filter Order
+paginate Order with pagination

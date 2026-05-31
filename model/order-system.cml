@@ -1,0 +1,344 @@
+/* ============================================================
+   Order System – Context Mapper Model (CML)
+   Demonstrační aplikace: přístupy k datové konzistenci
+   ============================================================ */
+
+ContextMap OrderSystemContextMap {
+
+    contains OrderContext
+    contains PaymentContext
+    contains InventoryContext
+
+    OrderContext [OHS, PL] -> [ACL] PaymentContext {
+        implementationTechnology = "Apache Kafka (async events)"
+        exposedAggregates = Orders
+    }
+
+    OrderContext [OHS, PL] -> [ACL] InventoryContext {
+        implementationTechnology = "Apache Kafka (async events)"
+        exposedAggregates = Orders
+    }
+}
+
+/* ============================================================
+   ORDER CONTEXT
+   ============================================================ */
+
+BoundedContext OrderContext implements OrderDomain {
+    domainVisionStatement = "Spravuje celý životní cyklus objednávky od vytvoření po doručení nebo zrušení. Koordinuje distribuovaný proces napříč Payment a Inventory kontexty."
+    implementationTechnology = "Spring Boot, PostgreSQL"
+    knowledgeLevel = CONCRETE
+
+    Aggregate Orders {
+        Entity Order {
+            aggregateRoot
+
+            - OrderId orderId
+            - CustomerId customerId
+            - List<OrderItem> items
+            - ShippingAddress shippingAddress
+            - Money totalAmount
+            - OrderStatus status
+            Date createdAt
+            Date updatedAt
+
+            def void confirm();
+            def void cancel();
+            def void markPaymentPending();
+            def void markStockReserved();
+            def boolean canBeCancelled();
+        }
+
+        Entity OrderItem {
+            - OrderItemId itemId
+            - ProductId productId
+            String productName
+            - Quantity quantity
+            - Money unitPrice
+        }
+
+        ValueObject OrderId {
+            UUID id
+        }
+
+        ValueObject CustomerId {
+            UUID id
+        }
+
+        ValueObject OrderItemId {
+            UUID id
+        }
+
+        ValueObject ProductId {
+            UUID id
+        }
+
+        ValueObject ShippingAddress {
+            String street
+            String city
+            String postalCode
+            String country
+        }
+
+        ValueObject Money {
+            BigDecimal amount
+            String currency
+        }
+
+        ValueObject Quantity {
+            int value
+        }
+
+        enum OrderStatus {
+            PENDING,
+            STOCK_RESERVED,
+            PAYMENT_PENDING,
+            CONFIRMED,
+            CANCELLED
+        }
+
+        DomainEvent OrderCreated {
+            - OrderId orderId
+            - CustomerId customerId
+            - List<OrderItem> items
+            - Money totalAmount
+            Date occurredAt
+        }
+
+        DomainEvent OrderConfirmed {
+            - OrderId orderId
+            Date occurredAt
+        }
+
+        DomainEvent OrderCancelled {
+            - OrderId orderId
+            String reason
+            Date occurredAt
+        }
+    }
+
+    Aggregate OrderOutbox {
+        Entity OutboxMessage {
+            aggregateRoot
+
+            - OutboxMessageId messageId
+            String aggregateType
+            String aggregateId
+            String eventType
+            String payload
+            boolean published
+            Date createdAt
+        }
+
+        ValueObject OutboxMessageId {
+            UUID id
+        }
+    }
+}
+
+/* ============================================================
+   PAYMENT CONTEXT
+   ============================================================ */
+
+BoundedContext PaymentContext implements PaymentDomain {
+    domainVisionStatement = "Zpracovává platební transakce pro objednávky. Komunikuje s externí platební bránou prostřednictvím Anti-Corruption Layer."
+    implementationTechnology = "Spring Boot, PostgreSQL"
+    knowledgeLevel = CONCRETE
+
+    Aggregate Payments {
+        Entity Payment {
+            aggregateRoot
+
+            - PaymentId paymentId
+            - OrderId orderId
+            - Money amount
+            - PaymentMethod paymentMethod
+            - PaymentStatus status
+            String externalTransactionId
+            Date createdAt
+            Date processedAt
+
+            def void authorize();
+            def void capture();
+            def void fail(String reason);
+            def void refund();
+        }
+
+        ValueObject PaymentId {
+            UUID id
+        }
+
+        ValueObject OrderId {
+            UUID id
+        }
+
+        ValueObject Money {
+            BigDecimal amount
+            String currency
+        }
+
+        ValueObject PaymentMethod {
+            String paymentType
+            String maskedCardNumber
+        }
+
+        enum PaymentStatus {
+            PENDING,
+            AUTHORIZED,
+            CAPTURED,
+            FAILED,
+            REFUNDED
+        }
+
+        DomainEvent PaymentCompleted {
+            - PaymentId paymentId
+            - OrderId orderId
+            - Money amount
+            Date occurredAt
+        }
+
+        DomainEvent PaymentFailed {
+            - PaymentId paymentId
+            - OrderId orderId
+            String reason
+            Date occurredAt
+        }
+    }
+
+    Aggregate PaymentOutbox {
+        Entity OutboxMessage {
+            aggregateRoot
+
+            - OutboxMessageId messageId
+            String aggregateType
+            String aggregateId
+            String eventType
+            String payload
+            boolean published
+            Date createdAt
+        }
+
+        ValueObject OutboxMessageId {
+            UUID id
+        }
+    }
+}
+
+/* ============================================================
+   INVENTORY CONTEXT
+   ============================================================ */
+
+BoundedContext InventoryContext implements InventoryDomain {
+    domainVisionStatement = "Spravuje stav skladu a rezervace zboží. Zajišťuje, že zboží není prodáno vícekrát, než je dostupné."
+    implementationTechnology = "Spring Boot, PostgreSQL"
+    knowledgeLevel = CONCRETE
+
+    Aggregate StockManagement {
+        Entity StockItem {
+            aggregateRoot
+
+            - StockItemId stockItemId
+            - ProductId productId
+            String productName
+            int availableQuantity
+            int reservedQuantity
+
+            def boolean canReserve(int quantity);
+            def void reserve(int quantity);
+            def void release(int quantity);
+            def void deduct(int quantity);
+        }
+
+        Entity StockReservation {
+            - ReservationId reservationId
+            - OrderId orderId
+            - ProductId productId
+            int quantity
+            - ReservationStatus status
+            Date createdAt
+            Date expiresAt
+        }
+
+        ValueObject StockItemId {
+            UUID id
+        }
+
+        ValueObject ProductId {
+            UUID id
+        }
+
+        ValueObject ReservationId {
+            UUID id
+        }
+
+        ValueObject OrderId {
+            UUID id
+        }
+
+        enum ReservationStatus {
+            ACTIVE,
+            FINALIZED,
+            RELEASED
+        }
+
+        DomainEvent StockReserved {
+            - OrderId orderId
+            - List<ReservationId> reservationIds
+            Date occurredAt
+        }
+
+        DomainEvent StockReservationFailed {
+            - OrderId orderId
+            String reason
+            Date occurredAt
+        }
+
+        DomainEvent StockReleased {
+            - OrderId orderId
+            Date occurredAt
+        }
+    }
+
+    Aggregate InventoryOutbox {
+        Entity OutboxMessage {
+            aggregateRoot
+
+            - OutboxMessageId messageId
+            String aggregateType
+            String aggregateId
+            String eventType
+            String payload
+            boolean published
+            Date createdAt
+        }
+
+        ValueObject OutboxMessageId {
+            UUID id
+        }
+    }
+}
+
+/* ============================================================
+   DOMAIN DECLARATIONS
+   ============================================================ */
+
+Domain OrderDomain {
+    Subdomain OrderManagement {
+        type = CORE_DOMAIN
+        domainVisionStatement = "Správa objednávek je klíčovou doménou systému."
+    }
+}
+
+Domain PaymentDomain {
+    Subdomain PaymentProcessing {
+        type = SUPPORTING_DOMAIN
+        domainVisionStatement = "Zpracování plateb podporuje hlavní doménu."
+    }
+}
+
+Domain InventoryDomain {
+    Subdomain InventoryManagement {
+        type = SUPPORTING_DOMAIN
+        domainVisionStatement = "Správa skladu podporuje hlavní doménu."
+    }
+}

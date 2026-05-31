@@ -1,0 +1,15 @@
+{
+  "generator-jhipster": {
+    "appsFolders": [
+      "gateway",
+      "inventory-service",
+      "order-service",
+      "payment-service"
+    ],
+    "deploymentType": "docker-compose",
+    "directoryPath": "../",
+    "jwtSecretKey": "NDBiZDliMTE5ODM5MjUzMWVmMTkwZGVkYWEzZWEzMjdiNjAxMDg3ZjNkNzE5NGJhMDk5MmNkNWE4YTE3M2Q5ZjYzYjNhZWFkOGZjZDA3ZmEwMjJjYWFmYmZkMTQ4MjUzZDVlMw==",
+    "monitoring": "no",
+    "serviceDiscoveryType": "consul"
+  }
+}

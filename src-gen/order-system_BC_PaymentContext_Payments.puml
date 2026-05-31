@@ -1,0 +1,61 @@
+@startuml
+
+skinparam componentStyle uml2
+
+package "'Payments' Aggregate" <<Rectangle>> {
+	class Payment <<(A,#fffab8) Aggregate Root>> {
+		String externalTransactionId
+		Date createdAt
+		Date processedAt
+		PaymentId paymentId
+		OrderId orderId
+		Money amount
+		PaymentMethod paymentMethod
+		PaymentStatus status
+		void authorize()
+		void capture()
+		void fail(String reason)
+		void refund()
+	}
+	class PaymentId <<(V,DarkSeaGreen) Value Object>> {
+		UUID id
+	}
+	class OrderId <<(V,DarkSeaGreen) Value Object>> {
+		UUID id
+	}
+	class Money <<(V,DarkSeaGreen) Value Object>> {
+		BigDecimal amount
+		String currency
+	}
+	class PaymentMethod <<(V,DarkSeaGreen) Value Object>> {
+		String paymentType
+		String maskedCardNumber
+	}
+	enum PaymentStatus {
+		PENDING
+		AUTHORIZED
+		CAPTURED
+		FAILED
+		REFUNDED
+	}
+	class PaymentCompleted <<(E,#ff9f4b) Domain Event>> {
+		Date occurredAt
+		PaymentId paymentId
+		OrderId orderId
+		Money amount
+	}
+	class PaymentFailed <<(E,#ff9f4b) Domain Event>> {
+		String reason
+		Date occurredAt
+		PaymentId paymentId
+		OrderId orderId
+	}
+}
+Payment --> PaymentId : paymentId
+Payment --> PaymentMethod : paymentMethod
+Payment --> PaymentStatus : status
+PaymentCompleted --> PaymentId : paymentId
+PaymentFailed --> PaymentId : paymentId
+
+
+@enduml

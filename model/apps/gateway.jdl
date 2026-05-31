@@ -1,0 +1,13 @@
+application {
+    config {
+        baseName gateway
+        applicationType gateway
+        packageName cz.ordersystem.gateway
+        serviceDiscoveryType consul
+        authenticationType jwt
+        clientFramework no
+        serverPort 8080
+        prodDatabaseType postgresql
+        devDatabaseType postgresql
+    }
+}

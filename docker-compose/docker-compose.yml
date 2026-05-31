@@ -1,0 +1,181 @@
+services:
+  gateway:
+    image: gateway
+    environment:
+      - _JAVA_OPTIONS=-Xmx512m -Xms256m
+      - SPRING_PROFILES_ACTIVE=prod,api-docs,secret-samples
+      - MANAGEMENT_PROMETHEUS_METRICS_EXPORT_ENABLED=true
+      - SPRING_CLOUD_CONSUL_HOST=consul
+      - SPRING_CLOUD_CONSUL_PORT=8500
+      - SPRING_R2DBC_URL=r2dbc:postgresql://gateway-postgresql:5432/gateway
+      - SPRING_R2DBC_USERNAME=gateway
+      - SPRING_R2DBC_PASSWORD=
+      - SPRING_LIQUIBASE_URL=jdbc:postgresql://gateway-postgresql:5432/gateway
+    ports:
+      - 8080:8080
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080; printf \"GET /management/health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3; grep -q \"\\\"status\\\":\\\"UP\\\"\" <&3'"
+      interval: 5s
+      timeout: 5s
+      retries: 40
+    depends_on:
+      gateway-postgresql:
+        condition: service_healthy
+  gateway-postgresql:
+    image: postgres:18.4
+    environment:
+      - POSTGRES_USER=gateway
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U $${POSTGRES_USER}
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  inventoryservice:
+    image: inventoryservice
+    environment:
+      - _JAVA_OPTIONS=-Xmx512m -Xms256m
+      - SPRING_PROFILES_ACTIVE=prod,api-docs,secret-samples
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - SPRING_KAFKA_CONSUMER_AUTO_OFFSET_RESET=earliest
+      - MANAGEMENT_PROMETHEUS_METRICS_EXPORT_ENABLED=true
+      - SPRING_CLOUD_CONSUL_HOST=consul
+      - SPRING_CLOUD_CONSUL_PORT=8500
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://inventoryservice-postgresql:5432/inventoryService
+      - SPRING_DATASOURCE_USERNAME=inventoryService
+      - SPRING_DATASOURCE_PASSWORD=
+      - SPRING_LIQUIBASE_URL=jdbc:postgresql://inventoryservice-postgresql:5432/inventoryService
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8083; printf \"GET /management/health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3; grep -q \"\\\"status\\\":\\\"UP\\\"\" <&3'"
+      interval: 5s
+      timeout: 5s
+      retries: 40
+    depends_on:
+      inventoryservice-postgresql:
+        condition: service_healthy
+  inventoryservice-postgresql:
+    image: postgres:18.4
+    environment:
+      - POSTGRES_USER=inventoryService
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U $${POSTGRES_USER}
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  orderservice:
+    image: orderservice
+    ports:
+      - "8081:8081"
+    environment:
+      - _JAVA_OPTIONS=-Xmx512m -Xms256m
+      - SPRING_PROFILES_ACTIVE=prod,api-docs,secret-samples
+      - MANAGEMENT_PROMETHEUS_METRICS_EXPORT_ENABLED=true
+      - SPRING_CLOUD_CONSUL_HOST=consul
+      - SPRING_CLOUD_CONSUL_PORT=8500
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://orderservice-postgresql:5432/orderService
+      - SPRING_DATASOURCE_USERNAME=orderService
+      - SPRING_DATASOURCE_PASSWORD=
+      - SPRING_LIQUIBASE_URL=jdbc:postgresql://orderservice-postgresql:5432/orderService
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081; printf \"GET /management/health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3; grep -q \"\\\"status\\\":\\\"UP\\\"\" <&3'"
+      interval: 5s
+      timeout: 5s
+      retries: 40
+    depends_on:
+      orderservice-postgresql:
+        condition: service_healthy
+  orderservice-postgresql:
+    image: postgres:18.4
+    environment:
+      - POSTGRES_USER=orderService
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U $${POSTGRES_USER}
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  paymentservice:
+    image: paymentservice
+    environment:
+      - _JAVA_OPTIONS=-Xmx512m -Xms256m
+      - SPRING_PROFILES_ACTIVE=prod,api-docs,secret-samples
+      - MANAGEMENT_PROMETHEUS_METRICS_EXPORT_ENABLED=true
+      - SPRING_CLOUD_CONSUL_HOST=consul
+      - SPRING_CLOUD_CONSUL_PORT=8500
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://paymentservice-postgresql:5432/paymentService
+      - SPRING_DATASOURCE_USERNAME=paymentService
+      - SPRING_DATASOURCE_PASSWORD=
+      - SPRING_LIQUIBASE_URL=jdbc:postgresql://paymentservice-postgresql:5432/paymentService
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8082; printf \"GET /management/health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3; grep -q \"\\\"status\\\":\\\"UP\\\"\" <&3'"
+      interval: 5s
+      timeout: 5s
+      retries: 40
+    depends_on:
+      paymentservice-postgresql:
+        condition: service_healthy
+  paymentservice-postgresql:
+    image: postgres:18.4
+    environment:
+      - POSTGRES_USER=paymentService
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U $${POSTGRES_USER}
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    image: apache/kafka-native:4.2.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://localhost:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_GROUP_COORDINATOR_REBALANCE_PROTOCOLS: classic,consumer
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      #ports:
+      # - 9092:9092 # Uncomment to make Kafka available externally
+  consul:
+    image: hashicorp/consul:2.0.0
+    ports:
+      - 8300:8300
+      - 8500:8500
+      - 8600:8600
+    command: consul agent -dev -ui -client 0.0.0.0 -log-level=INFO
+  consul-config-loader:
+    image: jhipster/consul-config-loader:v0.4.1
+    volumes:
+      - ./central-server-config:/config
+    environment:
+      - INIT_SLEEP_SECONDS=5
+      - CONSUL_URL=consul
+      - CONSUL_PORT=8500

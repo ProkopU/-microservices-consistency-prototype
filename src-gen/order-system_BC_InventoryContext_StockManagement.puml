@@ -1,0 +1,64 @@
+@startuml
+
+skinparam componentStyle uml2
+
+package "'StockManagement' Aggregate" <<Rectangle>> {
+	class StockItem <<(A,#fffab8) Aggregate Root>> {
+		String productName
+		int availableQuantity
+		int reservedQuantity
+		StockItemId stockItemId
+		ProductId productId
+		boolean canReserve(int quantity)
+		void reserve(int quantity)
+		void release(int quantity)
+		void deduct(int quantity)
+	}
+	class StockReservation <<(E,DarkSeaGreen) Entity>> {
+		int quantity
+		Date createdAt
+		Date expiresAt
+		ReservationId reservationId
+		OrderId orderId
+		ProductId productId
+		ReservationStatus status
+	}
+	class StockItemId <<(V,DarkSeaGreen) Value Object>> {
+		UUID id
+	}
+	class ProductId <<(V,DarkSeaGreen) Value Object>> {
+		UUID id
+	}
+	class ReservationId <<(V,DarkSeaGreen) Value Object>> {
+		UUID id
+	}
+	class OrderId <<(V,DarkSeaGreen) Value Object>> {
+		UUID id
+	}
+	enum ReservationStatus {
+		ACTIVE
+		FINALIZED
+		RELEASED
+	}
+	class StockReserved <<(E,#ff9f4b) Domain Event>> {
+		Date occurredAt
+		OrderId orderId
+		List<ReservationId> reservationIds
+	}
+	class StockReservationFailed <<(E,#ff9f4b) Domain Event>> {
+		String reason
+		Date occurredAt
+		OrderId orderId
+	}
+	class StockReleased <<(E,#ff9f4b) Domain Event>> {
+		Date occurredAt
+		OrderId orderId
+	}
+}
+StockReserved "1" *--> "*" ReservationId : reservationIds
+StockReservation --> ReservationId : reservationId
+StockItem --> StockItemId : stockItemId
+StockReservation --> ReservationStatus : status
+
+
+@enduml

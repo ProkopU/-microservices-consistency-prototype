@@ -1,0 +1,113 @@
+@startuml
+
+skinparam componentStyle uml2
+
+package "'Orders' Aggregate" <<Rectangle>> {
+	class Order <<(A,#fffab8) Aggregate Root>> {
+		Date createdAt
+		Date updatedAt
+		OrderId orderId
+		CustomerId customerId
+		List<OrderItem> items
+		ShippingAddress shippingAddress
+		Money totalAmount
+		OrderStatus status
+		void confirm()
+		void cancel()
+		void markPaymentPending()
+		void markStockReserved()
+		boolean canBeCancelled()
+	}
+	class OrderItem <<(E,DarkSeaGreen) Entity>> {
+		String productName
+		OrderItemId itemId
+		ProductId productId
+		Quantity quantity
+		Money unitPrice
+	}
+	class OrderId <<(V,DarkSeaGreen) Value Object>> {
+		UUID id
+	}
+	class CustomerId <<(V,DarkSeaGreen) Value Object>> {
+		UUID id
+	}
+	class OrderItemId <<(V,DarkSeaGreen) Value Object>> {
+		UUID id
+	}
+	class ProductId <<(V,DarkSeaGreen) Value Object>> {
+		UUID id
+	}
+	class ShippingAddress <<(V,DarkSeaGreen) Value Object>> {
+		String street
+		String city
+		String postalCode
+		String country
+	}
+	class Money <<(V,DarkSeaGreen) Value Object>> {
+		BigDecimal amount
+		String currency
+	}
+	class Quantity <<(V,DarkSeaGreen) Value Object>> {
+		int value
+	}
+	enum OrderStatus {
+		PENDING
+		STOCK_RESERVED
+		PAYMENT_PENDING
+		CONFIRMED
+		CANCELLED
+	}
+	class OrderCreated <<(E,#ff9f4b) Domain Event>> {
+		Date occurredAt
+		OrderId orderId
+		CustomerId customerId
+		List<OrderItem> items
+		Money totalAmount
+	}
+	class OrderConfirmed <<(E,#ff9f4b) Domain Event>> {
+		Date occurredAt
+		OrderId orderId
+	}
+	class OrderCancelled <<(E,#ff9f4b) Domain Event>> {
+		String reason
+		Date occurredAt
+		OrderId orderId
+	}
+}
+package "'OrderOutbox' Aggregate" <<Rectangle>> {
+	class OutboxMessage <<(A,#fffab8) Aggregate Root>> {
+		String aggregateType
+		String aggregateId
+		String eventType
+		String payload
+		boolean published
+		Date createdAt
+		OutboxMessageId messageId
+	}
+	class OutboxMessageId <<(V,DarkSeaGreen) Value Object>> {
+		UUID id
+	}
+}
+OrderCreated "1" *--> "*" OrderItem : items
+OrderCreated --> CustomerId : customerId
+OrderCreated --> Money : totalAmount
+OrderCreated --> OrderId : orderId
+Order --> ShippingAddress : shippingAddress
+Order --> OrderId : orderId
+OrderConfirmed --> OrderId : orderId
+OrderCancelled --> OrderId : orderId
+OrderItem --> OrderItemId : itemId
+Order --> CustomerId : customerId
+Order --> OrderStatus : status
+OrderItem --> ProductId : productId
+Order "1" *--> "*" OrderItem : items
+OrderItem --> Money : unitPrice
+OutboxMessage --> OutboxMessageId : messageId
+Order --> Money : totalAmount
+OrderItem --> Quantity : quantity
+legend left
+  This bounded context implements the subdomain 'OrderManagement'.
+end legend
+
+
+@enduml

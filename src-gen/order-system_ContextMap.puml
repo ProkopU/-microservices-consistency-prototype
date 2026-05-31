@@ -1,0 +1,38 @@
+@startuml
+
+skinparam componentStyle uml2
+
+component [OrderContext]
+note right of [OrderContext]
+Spravuje celý životní cyklus objednávky 
+od vytvoření po doručení nebo 
+zrušení. Koordinuje distribuovaný 
+proces napříč Payment a Inventory 
+kontexty. 
+end note
+component [PaymentContext]
+note right of [PaymentContext]
+Zpracovává platební transakce 
+pro objednávky. Komunikuje s externí 
+platební bránou prostřednictvím 
+Anti-Corruption Layer. 
+end note
+component [InventoryContext]
+note right of [InventoryContext]
+Spravuje stav skladu a rezervace 
+zboží. Zajišťuje, že zboží není 
+prodáno vícekrát, než je dostupné. 
+
+end note
+
+interface "Apache Kafka (async events)" as PaymentContext_to_OrderContext
+[OrderContext] --> PaymentContext_to_OrderContext : OPEN_HOST_SERVICE, PUBLISHED_LANGUAGE
+PaymentContext_to_OrderContext <.. [PaymentContext] : use Aggregate Orders via ANTICORRUPTION_LAYER
+
+interface "Apache Kafka (async events)" as InventoryContext_to_OrderContext
+[OrderContext] --> InventoryContext_to_OrderContext : OPEN_HOST_SERVICE, PUBLISHED_LANGUAGE
+InventoryContext_to_OrderContext <.. [InventoryContext] : use Aggregate Orders via ANTICORRUPTION_LAYER
+
+
+
+@enduml

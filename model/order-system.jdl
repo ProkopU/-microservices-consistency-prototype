@@ -1,0 +1,218 @@
+/*
+ * Order System – JHipster JDL Model
+ * Generuje kostru tří Spring Boot mikroservis + API Gateway
+ *
+ * Spuštění:
+ *   jhipster jdl order-system.jdl
+ *
+ * Nebo pro každou aplikaci zvlášť:
+ *   mkdir gateway      && cd gateway      && jhipster jdl ../order-system.jdl --ignore-application
+ *   mkdir order-service && cd order-service && jhipster jdl ../order-system.jdl --ignore-application
+ *   atd.
+ */
+
+/* ============================================================
+   APLIKACE
+   ============================================================ */
+
+application {
+    config {
+        baseName gateway
+        applicationType gateway
+        packageName cz.ordersystem.gateway
+        serviceDiscoveryType consul
+        authenticationType jwt
+        clientFramework no
+        serverPort 8080
+        prodDatabaseType postgresql
+        devDatabaseType postgresql
+    }
+    entities *
+}
+
+application {
+    config {
+        baseName orderService
+        applicationType microservice
+        packageName cz.ordersystem.order
+        serviceDiscoveryType consul
+        authenticationType jwt
+        serverPort 8081
+        prodDatabaseType postgresql
+        devDatabaseType postgresql
+        messageBroker kafka
+        enableSwaggerCodegen true
+    }
+    entities Order, OrderItem, OutboxMessage
+}
+
+application {
+    config {
+        baseName paymentService
+        applicationType microservice
+        packageName cz.ordersystem.payment
+        serviceDiscoveryType consul
+        authenticationType jwt
+        serverPort 8082
+        prodDatabaseType postgresql
+        devDatabaseType postgresql
+        messageBroker kafka
+        enableSwaggerCodegen true
+    }
+    entities Payment, PaymentOutboxMessage
+}
+
+application {
+    config {
+        baseName inventoryService
+        applicationType microservice
+        packageName cz.ordersystem.inventory
+        serviceDiscoveryType consul
+        authenticationType jwt
+        serverPort 8083
+        prodDatabaseType postgresql
+        devDatabaseType postgresql
+        messageBroker kafka
+        enableSwaggerCodegen true
+    }
+    entities StockItem, StockReservation, InventoryOutboxMessage
+}
+
+/* ============================================================
+   ENTITY – ORDER SERVICE
+   ============================================================ */
+
+enum OrderStatus {
+    PENDING,
+    STOCK_RESERVED,
+    PAYMENT_PENDING,
+    CONFIRMED,
+    CANCELLED
+}
+
+entity Order {
+    customerId      UUID         required
+    status          OrderStatus  required
+    totalAmount     BigDecimal   required min(0)
+    currency        String       required maxlength(3)
+    street          String       required maxlength(255)
+    city            String       required maxlength(100)
+    postalCode      String       required maxlength(20)
+    country         String       required maxlength(100)
+    createdAt       Instant      required
+    updatedAt       Instant
+}
+
+entity OrderItem {
+    productId       UUID         required
+    productName     String       required maxlength(255)
+    quantity        Integer      required min(1)
+    unitPrice       BigDecimal   required min(0)
+    currency        String       required maxlength(3)
+}
+
+/* Outbox tabulka pro spolehlivé publikování zpráv */
+entity OutboxMessage {
+    aggregateType   String       required maxlength(100)
+    aggregateId     String       required maxlength(100)
+    eventType       String       required maxlength(100)
+    payload         TextBlob     required
+    published       Boolean      required
+    createdAt       Instant      required
+}
+
+relationship OneToMany {
+    Order{items} to OrderItem{order required}
+}
+
+microservice Order, OrderItem, OutboxMessage with orderService
+paginate Order with pagination
+dto Order, OrderItem with mapstruct
+service Order with serviceImpl
+filter Order
+
+/* ============================================================
+   ENTITY – PAYMENT SERVICE
+   ============================================================ */
+
+enum PaymentStatus {
+    PENDING,
+    AUTHORIZED,
+    CAPTURED,
+    FAILED,
+    REFUNDED
+}
+
+enum PaymentMethodType {
+    CARD,
+    BANK_TRANSFER,
+    WALLET
+}
+
+entity Payment {
+    orderId             UUID              required
+    amount              BigDecimal        required min(0)
+    currency            String            required maxlength(3)
+    paymentMethodType   PaymentMethodType required
+    maskedCardNumber    String            maxlength(20)
+    status              PaymentStatus     required
+    externalTransactionId String          maxlength(255)
+    failureReason       String            maxlength(500)
+    createdAt           Instant           required
+    processedAt         Instant
+}
+
+entity PaymentOutboxMessage {
+    aggregateType   String       required maxlength(100)
+    aggregateId     String       required maxlength(100)
+    eventType       String       required maxlength(100)
+    payload         TextBlob     required
+    published       Boolean      required
+    createdAt       Instant      required
+}
+
+microservice Payment, PaymentOutboxMessage with paymentService
+dto Payment with mapstruct
+service Payment with serviceImpl
+filter Payment
+
+/* ============================================================
+   ENTITY – INVENTORY SERVICE
+   ============================================================ */
+
+enum ReservationStatus {
+    ACTIVE,
+    FINALIZED,
+    RELEASED
+}
+
+entity StockItem {
+    productId           UUID        required
+    productName         String      required maxlength(255)
+    availableQuantity   Integer     required min(0)
+    reservedQuantity    Integer     required min(0)
+    updatedAt           Instant
+}
+
+entity StockReservation {
+    orderId         UUID                required
+    productId       UUID                required
+    quantity        Integer             required min(1)
+    status          ReservationStatus   required
+    createdAt       Instant             required
+    expiresAt       Instant
+}
+
+entity InventoryOutboxMessage {
+    aggregateType   String       required maxlength(100)
+    aggregateId     String       required maxlength(100)
+    eventType       String       required maxlength(100)
+    payload         TextBlob     required
+    published       Boolean      required
+    createdAt       Instant      required
+}
+
+microservice StockItem, StockReservation, InventoryOutboxMessage with inventoryService
+dto StockItem, StockReservation with mapstruct
+service StockItem, StockReservation with serviceImpl
+filter StockItem

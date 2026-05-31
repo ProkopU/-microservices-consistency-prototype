@@ -1,0 +1,55 @@
+application {
+    config {
+        baseName paymentService
+        applicationType microservice
+        packageName cz.ordersystem.payment
+        serviceDiscoveryType consul
+        authenticationType jwt
+        serverPort 8082
+        prodDatabaseType postgresql
+        devDatabaseType postgresql
+        messageBroker kafka
+        enableSwaggerCodegen true
+    }
+    entities Payment, PaymentOutboxMessage
+}
+
+enum PaymentStatus {
+    PENDING,
+    AUTHORIZED,
+    CAPTURED,
+    FAILED,
+    REFUNDED
+}
+
+enum PaymentMethodType {
+    CARD,
+    BANK_TRANSFER,
+    WALLET
+}
+
+entity Payment {
+    orderId               UUID              required
+    amount                BigDecimal        required min(0)
+    currency              String            required maxlength(3)
+    paymentMethodType     PaymentMethodType required
+    maskedCardNumber      String            maxlength(20)
+    status                PaymentStatus     required
+    externalTransactionId String            maxlength(255)
+    failureReason         String            maxlength(500)
+    createdAt             Instant           required
+    processedAt           Instant
+}
+
+entity PaymentOutboxMessage {
+    aggregateType   String       required maxlength(100)
+    aggregateId     String       required maxlength(100)
+    eventType       String       required maxlength(100)
+    payload         TextBlob     required
+    published       Boolean      required
+    createdAt       Instant      required
+}
+
+dto Payment with mapstruct
+service Payment with serviceImpl
+filter Payment

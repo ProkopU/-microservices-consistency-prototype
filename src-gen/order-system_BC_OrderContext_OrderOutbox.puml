@@ -1,0 +1,22 @@
+@startuml
+
+skinparam componentStyle uml2
+
+package "'OrderOutbox' Aggregate" <<Rectangle>> {
+	class OutboxMessage <<(A,#fffab8) Aggregate Root>> {
+		String aggregateType
+		String aggregateId
+		String eventType
+		String payload
+		boolean published
+		Date createdAt
+		OutboxMessageId messageId
+	}
+	class OutboxMessageId <<(V,DarkSeaGreen) Value Object>> {
+		UUID id
+	}
+}
+OutboxMessage --> OutboxMessageId : messageId
+
+
+@enduml

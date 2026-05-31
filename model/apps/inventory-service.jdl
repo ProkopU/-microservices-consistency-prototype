@@ -1,0 +1,51 @@
+application {
+    config {
+        baseName inventoryService
+        applicationType microservice
+        packageName cz.ordersystem.inventory
+        serviceDiscoveryType consul
+        authenticationType jwt
+        serverPort 8083
+        prodDatabaseType postgresql
+        devDatabaseType postgresql
+        messageBroker kafka
+        enableSwaggerCodegen true
+    }
+    entities StockItem, StockReservation, InventoryOutboxMessage
+}
+
+enum ReservationStatus {
+    ACTIVE,
+    FINALIZED,
+    RELEASED
+}
+
+entity StockItem {
+    productId           UUID        required
+    productName         String      required maxlength(255)
+    availableQuantity   Integer     required min(0)
+    reservedQuantity    Integer     required min(0)
+    updatedAt           Instant
+}
+
+entity StockReservation {
+    orderId         UUID                required
+    productId       UUID                required
+    quantity        Integer             required min(1)
+    status          ReservationStatus   required
+    createdAt       Instant             required
+    expiresAt       Instant
+}
+
+entity InventoryOutboxMessage {
+    aggregateType   String       required maxlength(100)
+    aggregateId     String       required maxlength(100)
+    eventType       String       required maxlength(100)
+    payload         TextBlob     required
+    published       Boolean      required
+    createdAt       Instant      required
+}
+
+dto StockItem, StockReservation with mapstruct
+service StockItem, StockReservation with serviceImpl
+filter StockItem
