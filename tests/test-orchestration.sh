@@ -12,6 +12,10 @@
 
 set -euo pipefail
 
+# docker-compose logs below needs the compose file in the cwd, so anchor
+# to docker-compose/ regardless of where this script was invoked from.
+cd "$(cd "$(dirname "$0")" && pwd)/../docker-compose"
+
 GATEWAY="http://localhost:8080"
 ORDER_SERVICE="http://localhost:8081"
 

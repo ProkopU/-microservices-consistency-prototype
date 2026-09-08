@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Consistency Prototype — Control Panel</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --text: #1a1d21;
+    --muted: #6b7280;
+    --border: #e3e5e8;
+    --accent: #2563eb;
+    --accent-text: #ffffff;
+    --ok: #16a34a;
+    --warn: #d97706;
+    --err: #dc2626;
+    --idle: #9ca3af;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c;
+      --panel: #1f2227;
+      --text: #e8eaed;
+      --muted: #9aa0a6;
+      --border: #2c2f36;
+      --accent: #3b82f6;
+      --accent-text: #0b0d10;
+      --ok: #4ade80;
+      --warn: #fbbf24;
+      --err: #f87171;
+      --idle: #6b7280;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: 24px;
+  }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  .sub { color: var(--muted); font-size: 12px; margin: 0 0 20px; word-break: break-all; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  button {
+    font: inherit;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button.danger { color: var(--err); border-color: var(--err); }
+  button.small { padding: 3px 9px; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  tr:last-child td { border-bottom: none; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  }
+  .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .badge.running { color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent); }
+  .badge.restarting { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+  .badge.exited, .badge.dead { color: var(--err); background: color-mix(in srgb, var(--err) 15%, transparent); }
+  .badge.idle { color: var(--idle); background: color-mix(in srgb, var(--idle) 15%, transparent); }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .status-line { font-size: 12px; color: var(--muted); min-height: 16px; }
+  .status-line.err { color: var(--err); }
+  #logsPanel { display: none; }
+  #logsPanel pre {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px; max-height: 420px; overflow: auto; font-size: 12px; white-space: pre-wrap;
+  }
+  select { font: inherit; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
+</style>
+</head>
+<body>
+  <h1>Consistency Prototype — Control Panel</h1>
+  <p class="sub" id="composeFile">loading…</p>
+
+  <div class="panel">
+    <div class="row">
+      <button class="primary" onclick="stackAction('up')">▶ Start stack</button>
+      <button class="danger" onclick="stackAction('down')">■ Stop stack</button>
+      <button onclick="stackAction('restart')">↻ Restart stack</button>
+      <span style="flex:1"></span>
+      <button onclick="refresh()">⟳ Refresh</button>
+    </div>
+    <div class="status-line" id="stackStatus"></div>
+  </div>
+
+  <div class="panel">
+    <table>
+      <thead>
+        <tr><th>Service</th><th>State</th><th>Status</th><th>Ports</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="serviceRows">
+        <tr><td colspan="5" class="sub">loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel" id="logsPanel">
+    <div class="row">
+      <strong id="logsTitle">logs</strong>
+      <select id="logsLines" onchange="showLogs(currentLogsService)">
+        <option value="100">last 100 lines</option>
+        <option value="200" selected>last 200 lines</option>
+        <option value="500">last 500 lines</option>
+      </select>
+      <span style="flex:1"></span>
+      <button class="small" onclick="showLogs(currentLogsService)">⟳ reload</button>
+      <button class="small" onclick="closeLogs()">✕ close</button>
+    </div>
+    <pre id="logsBody"></pre>
+  </div>
+
+  <div class="panel">
+    <strong>E2E tests</strong>
+    <p class="sub" id="testsDir">loading…</p>
+    <table>
+      <thead>
+        <tr><th>Script</th><th>Last result</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="testRows">
+        <tr><td colspan="3" class="sub">loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel" id="testOutputPanel" style="display:none">
+    <div class="row">
+      <strong id="testOutputTitle">test output</strong>
+      <span id="testOutputBadge" class="badge idle">running</span>
+      <span style="flex:1"></span>
+      <button class="small" onclick="closeTestOutput()">✕ close</button>
+    </div>
+    <pre id="testOutputBody"></pre>
+  </div>
+
+<script>
+let currentLogsService = null;
+let refreshTimer = null;
+
+function badgeClass(state) {
+  state = (state || '').toLowerCase();
+  if (state.includes('running')) return 'running';
+  if (state.includes('restart')) return 'restarting';
+  if (state.includes('exit') || state.includes('dead')) return 'exited';
+  return 'idle';
+}
+
+function fmtPorts(ports) {
+  if (!ports || !ports.length) return '–';
+  return ports
+    .map(p => {
+      if (typeof p === 'string') return p;
+      const pub = p.PublishedPort || p.published;
+      const tgt = p.TargetPort || p.target;
+      return pub ? `${pub}→${tgt}` : `${tgt}`;
+    })
+    .filter(Boolean)
+    .join(', ') || '–';
+}
+
+async function refresh() {
+  try {
+    const res = await fetch('/api/services');
+    const data = await res.json();
+    if (data.error) {
+      document.getElementById('serviceRows').innerHTML =
+        `<tr><td colspan="5" class="status-line err">${data.error}</td></tr>`;
+      return;
+    }
+    document.getElementById('composeFile').textContent = data.compose_file;
+    const rows = data.services.map(s => `
+      <tr>
+        <td>${s.name}</td>
+        <td><span class="badge ${badgeClass(s.state)}">${s.state}</span></td>
+        <td class="sub">${s.status || '–'}</td>
+        <td class="sub">${fmtPorts(s.ports)}</td>
+        <td class="actions">
+          <button class="small" onclick="serviceAction('${s.name}','start')">start</button>
+          <button class="small" onclick="serviceAction('${s.name}','stop')">stop</button>
+          <button class="small" onclick="serviceAction('${s.name}','restart')">restart</button>
+          <button class="small" onclick="showLogs('${s.name}')">logs</button>
+        </td>
+      </tr>`).join('');
+    document.getElementById('serviceRows').innerHTML = rows || '<tr><td colspan="5" class="sub">no services defined</td></tr>';
+  } catch (e) {
+    document.getElementById('serviceRows').innerHTML =
+      `<tr><td colspan="5" class="status-line err">failed to reach control panel server: ${e}</td></tr>`;
+  }
+}
+
+function setStatus(msg, isErr) {
+  const el = document.getElementById('stackStatus');
+  el.textContent = msg;
+  el.className = 'status-line' + (isErr ? ' err' : '');
+}
+
+async function stackAction(action) {
+  setStatus(`running: docker compose ${action}…`);
+  try {
+    const res = await fetch(`/api/stack/${action}`, { method: 'POST' });
+    const data = await res.json();
+    setStatus(data.ok ? `${action} done` : `${action} failed: ${data.stderr || data.error}`, !data.ok);
+  } catch (e) {
+    setStatus(`${action} failed: ${e}`, true);
+  }
+  refresh();
+}
+
+async function serviceAction(name, action) {
+  setStatus(`${name}: running ${action}…`);
+  try {
+    const res = await fetch(`/api/service/${name}/${action}`, { method: 'POST' });
+    const data = await res.json();
+    setStatus(data.ok ? `${name}: ${action} done` : `${name}: ${action} failed: ${data.stderr || data.error}`, !data.ok);
+  } catch (e) {
+    setStatus(`${name}: ${action} failed: ${e}`, true);
+  }
+  refresh();
+}
+
+async function showLogs(name) {
+  currentLogsService = name;
+  document.getElementById('logsPanel').style.display = 'block';
+  document.getElementById('logsTitle').textContent = `logs — ${name}`;
+  document.getElementById('logsBody').textContent = 'loading…';
+  const lines = document.getElementById('logsLines').value;
+  try {
+    const res = await fetch(`/api/logs/${name}?lines=${lines}`);
+    document.getElementById('logsBody').textContent = await res.text();
+  } catch (e) {
+    document.getElementById('logsBody').textContent = 'failed to load logs: ' + e;
+  }
+}
+
+function closeLogs() {
+  currentLogsService = null;
+  document.getElementById('logsPanel').style.display = 'none';
+}
+
+let currentTestOutput = null;   // script name currently shown in the output pane
+let testState = {};             // script name -> { status: 'idle'|'running'|'pass'|'fail', runId }
+let testPollTimers = {};        // script name -> interval id
+
+function testBadgeClass(status) {
+  if (status === 'running') return 'restarting';
+  if (status === 'pass') return 'running';
+  if (status === 'fail') return 'exited';
+  return 'idle';
+}
+
+function testBadgeLabel(status) {
+  return status || 'idle';
+}
+
+async function refreshTests() {
+  try {
+    const res = await fetch('/api/tests');
+    const data = await res.json();
+    document.getElementById('testsDir').textContent = data.tests_dir;
+    const rows = data.scripts.map(name => {
+      const st = testState[name] || { status: 'idle' };
+      const label = name === 'run-all-tests.sh' ? 'Run all (sequential)' : 'Run';
+      const running = st.status === 'running';
+      return `
+      <tr>
+        <td>${name}</td>
+        <td><span class="badge ${testBadgeClass(st.status)}">${testBadgeLabel(st.status)}</span></td>
+        <td class="actions">
+          <button class="small" ${running ? 'disabled' : ''} onclick="runTest('${name}')">${label}</button>
+          <button class="small" onclick="viewTestOutput('${name}')">output</button>
+        </td>
+      </tr>`;
+    }).join('');
+    document.getElementById('testRows').innerHTML = rows || '<tr><td colspan="3" class="sub">no test scripts found</td></tr>';
+  } catch (e) {
+    document.getElementById('testRows').innerHTML =
+      `<tr><td colspan="3" class="status-line err">failed to load tests: ${e}</td></tr>`;
+  }
+}
+
+async function runTest(name) {
+  testState[name] = { status: 'running', runId: null };
+  refreshTests();
+  try {
+    const res = await fetch(`/api/tests/${name}/run`, { method: 'POST' });
+    const data = await res.json();
+    if (data.error) {
+      testState[name] = { status: 'fail', runId: null };
+      refreshTests();
+      return;
+    }
+    testState[name].runId = data.run_id;
+    viewTestOutput(name);
+    pollTestRun(name);
+  } catch (e) {
+    testState[name] = { status: 'fail', runId: null };
+    refreshTests();
+  }
+}
+
+function pollTestRun(name) {
+  if (testPollTimers[name]) clearInterval(testPollTimers[name]);
+  testPollTimers[name] = setInterval(async () => {
+    const st = testState[name];
+    if (!st || !st.runId) { clearInterval(testPollTimers[name]); return; }
+    try {
+      const res = await fetch(`/api/tests/runs/${st.runId}`);
+      const data = await res.json();
+      if (currentTestOutput === name) {
+        document.getElementById('testOutputBody').textContent = data.output || '';
+        const badge = document.getElementById('testOutputBadge');
+        const status = data.done ? (data.returncode === 0 ? 'pass' : 'fail') : 'running';
+        badge.className = 'badge ' + testBadgeClass(status);
+        badge.textContent = status;
+      }
+      if (data.done) {
+        st.status = data.returncode === 0 ? 'pass' : 'fail';
+        clearInterval(testPollTimers[name]);
+        refreshTests();
+      }
+    } catch (e) {
+      // keep trying on next tick
+    }
+  }, 1000);
+}
+
+function viewTestOutput(name) {
+  currentTestOutput = name;
+  document.getElementById('testOutputPanel').style.display = 'block';
+  document.getElementById('testOutputTitle').textContent = `test output — ${name}`;
+  const st = testState[name] || { status: 'idle' };
+  const badge = document.getElementById('testOutputBadge');
+  badge.className = 'badge ' + testBadgeClass(st.status);
+  badge.textContent = testBadgeLabel(st.status);
+  if (st.runId) {
+    fetch(`/api/tests/runs/${st.runId}`)
+      .then(r => r.json())
+      .then(data => { document.getElementById('testOutputBody').textContent = data.output || ''; });
+  } else {
+    document.getElementById('testOutputBody').textContent = '(not run yet in this session)';
+  }
+}
+
+function closeTestOutput() {
+  currentTestOutput = null;
+  document.getElementById('testOutputPanel').style.display = 'none';
+}
+
+refresh();
+refreshTests();
+refreshTimer = setInterval(refresh, 4000);
+</script>
+</body>
+</html>
