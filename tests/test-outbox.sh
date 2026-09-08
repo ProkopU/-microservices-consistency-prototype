@@ -4,6 +4,10 @@
 # =============================================================================
 set -euo pipefail
 
+# docker-compose exec below needs the compose file in the cwd, so anchor
+# to docker-compose/ regardless of where this script was invoked from.
+cd "$(cd "$(dirname "$0")" && pwd)/../docker-compose"
+
 GATEWAY="http://localhost:8080"
 ORDER_DB="docker-compose exec -T orderservice-postgresql psql -U orderService -d orderService -t -c"
 
@@ -32,57 +36,76 @@ TOKEN=$(curl -s -X POST "$GATEWAY/api/authenticate" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['id_token'])" 2>/dev/null)
 [ -n "$TOKEN" ] && pass "Token získán" || fail "Autentizace selhala"
 
-step "Vytvoření objednávky přes Outbox pattern"
-RESPONSE=$(curl -s -X POST "$GATEWAY/services/orderservice/api/orders/outbox" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "customerId": "22222222-2222-2222-2222-222222222222",
-    "status": "PENDING", "totalAmount": 299.99, "currency": "CZK",
-    "street": "Test", "city": "Praha", "postalCode": "11000",
-    "country": "CZ", "createdAt": "2026-05-31T10:00:00Z"
-  }')
-
-ORDER_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
-STATUS=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])" 2>/dev/null)
-[ -n "$ORDER_ID" ] && pass "Objednávka $ORDER_ID vytvořena (status: $STATUS)" || fail "Selhalo: $RESPONSE"
-
-step "Okamžitá kontrola Outbox tabulky (PŘED odesláním do Kafky)"
-info "Čekám 500ms – OutboxPublisher má 1s interval, zpráva by měla být stále v DB"
-sleep 0.5
-
-OUTBOX=$($ORDER_DB "SELECT id, event_type, published FROM outbox_message WHERE aggregate_id='$ORDER_ID' ORDER BY created_at;" | tr -d ' ')
-OUTBOX_COUNT=$(echo "$OUTBOX" | grep -c "order.created" || echo "0")
-
-if [ "$OUTBOX_COUNT" -ge 1 ]; then
-  pass "Zpráva nalezena v outbox_message tabulce"
-  echo ""
-  echo -e "  ${BOLD}Obsah Outbox tabulky:${NC}"
-  $ORDER_DB "SELECT id, event_type, published::text, to_char(created_at, 'HH24:MI:SS.MS') as created FROM outbox_message WHERE aggregate_id='$ORDER_ID';"
-  echo ""
-else
-  fail "Zpráva v outbox_message nenalezena"
-fi
-
-step "Čekání na OutboxPublisher (scheduler odešle do Kafky)"
-info "OutboxPublisher běží každou 1s a označí zprávu jako published=true"
-sleep 3
-
-PUBLISHED=$($ORDER_DB "SELECT published FROM outbox_message WHERE aggregate_id='$ORDER_ID' ORDER BY created_at LIMIT 1;" | tr -d ' ')
-[ "$PUBLISHED" = "t" ] && pass "Zpráva odeslána do Kafky (published=true)" || fail "Zpráva stále nepublikována (published=$PUBLISHED)"
-
-step "Čekání na dokončení sagu (Inventory → Payment → Confirmed)"
-MAX_WAIT=30; ELAPSED=0; FINAL_STATUS=""
-while [ $ELAPSED -lt $MAX_WAIT ]; do
-  sleep 2; ELAPSED=$((ELAPSED + 2))
-  FINAL_STATUS=$(curl -s "$GATEWAY/services/orderservice/api/orders/$ORDER_ID" \
+# payment-service simulates a ~10% random "insufficient funds" decline to
+# demonstrate saga compensation (PaymentApplicationService.Math.random() < 0.1).
+# That's unrelated to what this test is checking (the outbox mechanism), so
+# retry a fresh order a few times rather than failing on the unlucky 10%.
+MAX_ATTEMPTS=3
+FINAL_STATUS=""
+for ATTEMPT in $(seq 1 $MAX_ATTEMPTS); do
+  step "Vytvoření objednávky přes Outbox pattern (pokus $ATTEMPT/$MAX_ATTEMPTS)"
+  RESPONSE=$(curl -s -X POST "$GATEWAY/services/orderservice/api/orders/outbox" \
+    -H "Content-Type: application/json" \
     -H "Authorization: Bearer $TOKEN" \
-    | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
-  [ "$FINAL_STATUS" = "CONFIRMED" ] || [ "$FINAL_STATUS" = "CANCELLED" ] && break
-  echo -n "  ... čekám (${ELAPSED}s, status: ${FINAL_STATUS:-PENDING})"$'\r'
+    -d '{
+      "customerId": "22222222-2222-2222-2222-222222222222",
+      "status": "PENDING", "totalAmount": 299.99, "currency": "CZK",
+      "street": "Test", "city": "Praha", "postalCode": "11000",
+      "country": "CZ", "createdAt": "2026-05-31T10:00:00Z"
+    }')
+
+  ORDER_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+  STATUS=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])" 2>/dev/null)
+  [ -n "$ORDER_ID" ] && pass "Objednávka $ORDER_ID vytvořena (status: $STATUS)" || fail "Selhalo: $RESPONSE"
+
+  step "Okamžitá kontrola Outbox tabulky (PŘED odesláním do Kafky)"
+  info "Čekám 500ms – OutboxPublisher má 1s interval, zpráva by měla být stále v DB"
+  sleep 0.5
+
+  OUTBOX=$($ORDER_DB "SELECT id, event_type, published FROM outbox_message WHERE aggregate_id='$ORDER_ID' ORDER BY created_at;" | tr -d ' ')
+  OUTBOX_COUNT=$(echo "$OUTBOX" | grep -c "order.created" || echo "0")
+
+  if [ "$OUTBOX_COUNT" -ge 1 ]; then
+    pass "Zpráva nalezena v outbox_message tabulce"
+    echo ""
+    echo -e "  ${BOLD}Obsah Outbox tabulky:${NC}"
+    $ORDER_DB "SELECT id, event_type, published::text, to_char(created_at, 'HH24:MI:SS.MS') as created FROM outbox_message WHERE aggregate_id='$ORDER_ID';"
+    echo ""
+  else
+    fail "Zpráva v outbox_message nenalezena"
+  fi
+
+  step "Čekání na OutboxPublisher (scheduler odešle do Kafky)"
+  info "OutboxPublisher běží každou 1s a označí zprávu jako published=true"
+  sleep 3
+
+  PUBLISHED=$($ORDER_DB "SELECT published FROM outbox_message WHERE aggregate_id='$ORDER_ID' ORDER BY created_at LIMIT 1;" | tr -d ' ')
+  [ "$PUBLISHED" = "t" ] && pass "Zpráva odeslána do Kafky (published=true)" || fail "Zpráva stále nepublikována (published=$PUBLISHED)"
+
+  step "Čekání na dokončení sagu (Inventory → Payment → Confirmed)"
+  MAX_WAIT=30; ELAPSED=0; FINAL_STATUS=""
+  while [ $ELAPSED -lt $MAX_WAIT ]; do
+    sleep 2; ELAPSED=$((ELAPSED + 2))
+    FINAL_STATUS=$(curl -s "$GATEWAY/services/orderservice/api/orders/$ORDER_ID" \
+      -H "Authorization: Bearer $TOKEN" \
+      | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
+    [ "$FINAL_STATUS" = "CONFIRMED" ] || [ "$FINAL_STATUS" = "CANCELLED" ] && break
+    echo -n "  ... čekám (${ELAPSED}s, status: ${FINAL_STATUS:-PENDING})"$'\r'
+  done
+  echo ""
+
+  if [ "$FINAL_STATUS" = "CONFIRMED" ]; then
+    pass "Objednávka $ORDER_ID je CONFIRMED"
+    break
+  fi
+
+  if [ "$FINAL_STATUS" = "CANCELLED" ] && [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; then
+    info "Objednávka $ORDER_ID byla CANCELLED (simulované náhodné selhání platby) – zkouším novou objednávku"
+    continue
+  fi
+
+  fail "Status: $FINAL_STATUS"
 done
-echo ""
-[ "$FINAL_STATUS" = "CONFIRMED" ] && pass "Objednávka $ORDER_ID je CONFIRMED" || fail "Status: $FINAL_STATUS"
 
 echo ""
 echo -e "${BOLD}============================================================${NC}"

@@ -8,6 +8,10 @@
 
 set -euo pipefail
 
+# docker-compose exec below needs the compose file in the cwd, so anchor
+# to docker-compose/ regardless of where this script was invoked from.
+cd "$(cd "$(dirname "$0")" && pwd)/../docker-compose"
+
 GATEWAY="http://localhost:8080"
 ORDER_DB="docker-compose exec -T orderservice-postgresql psql -U orderService -d orderService -t -c"
 INVENTORY_DB="docker-compose exec -T inventoryservice-postgresql psql -U inventoryService -d inventoryService -t -c"
