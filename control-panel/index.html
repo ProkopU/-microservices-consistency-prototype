@@ -131,6 +131,29 @@
     <pre id="logsBody"></pre>
   </div>
 
+  <div class="panel">
+    <strong>E2E tests</strong>
+    <p class="sub" id="testsDir">loading…</p>
+    <table>
+      <thead>
+        <tr><th>Script</th><th>Last result</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="testRows">
+        <tr><td colspan="3" class="sub">loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel" id="testOutputPanel" style="display:none">
+    <div class="row">
+      <strong id="testOutputTitle">test output</strong>
+      <span id="testOutputBadge" class="badge idle">running</span>
+      <span style="flex:1"></span>
+      <button class="small" onclick="closeTestOutput()">✕ close</button>
+    </div>
+    <pre id="testOutputBody"></pre>
+  </div>
+
 <script>
 let currentLogsService = null;
 let refreshTimer = null;
@@ -235,7 +258,117 @@ function closeLogs() {
   document.getElementById('logsPanel').style.display = 'none';
 }
 
+let currentTestOutput = null;   // script name currently shown in the output pane
+let testState = {};             // script name -> { status: 'idle'|'running'|'pass'|'fail', runId }
+let testPollTimers = {};        // script name -> interval id
+
+function testBadgeClass(status) {
+  if (status === 'running') return 'restarting';
+  if (status === 'pass') return 'running';
+  if (status === 'fail') return 'exited';
+  return 'idle';
+}
+
+function testBadgeLabel(status) {
+  return status || 'idle';
+}
+
+async function refreshTests() {
+  try {
+    const res = await fetch('/api/tests');
+    const data = await res.json();
+    document.getElementById('testsDir').textContent = data.tests_dir;
+    const rows = data.scripts.map(name => {
+      const st = testState[name] || { status: 'idle' };
+      const label = name === 'run-all-tests.sh' ? 'Run all (sequential)' : 'Run';
+      const running = st.status === 'running';
+      return `
+      <tr>
+        <td>${name}</td>
+        <td><span class="badge ${testBadgeClass(st.status)}">${testBadgeLabel(st.status)}</span></td>
+        <td class="actions">
+          <button class="small" ${running ? 'disabled' : ''} onclick="runTest('${name}')">${label}</button>
+          <button class="small" onclick="viewTestOutput('${name}')">output</button>
+        </td>
+      </tr>`;
+    }).join('');
+    document.getElementById('testRows').innerHTML = rows || '<tr><td colspan="3" class="sub">no test scripts found</td></tr>';
+  } catch (e) {
+    document.getElementById('testRows').innerHTML =
+      `<tr><td colspan="3" class="status-line err">failed to load tests: ${e}</td></tr>`;
+  }
+}
+
+async function runTest(name) {
+  testState[name] = { status: 'running', runId: null };
+  refreshTests();
+  try {
+    const res = await fetch(`/api/tests/${name}/run`, { method: 'POST' });
+    const data = await res.json();
+    if (data.error) {
+      testState[name] = { status: 'fail', runId: null };
+      refreshTests();
+      return;
+    }
+    testState[name].runId = data.run_id;
+    viewTestOutput(name);
+    pollTestRun(name);
+  } catch (e) {
+    testState[name] = { status: 'fail', runId: null };
+    refreshTests();
+  }
+}
+
+function pollTestRun(name) {
+  if (testPollTimers[name]) clearInterval(testPollTimers[name]);
+  testPollTimers[name] = setInterval(async () => {
+    const st = testState[name];
+    if (!st || !st.runId) { clearInterval(testPollTimers[name]); return; }
+    try {
+      const res = await fetch(`/api/tests/runs/${st.runId}`);
+      const data = await res.json();
+      if (currentTestOutput === name) {
+        document.getElementById('testOutputBody').textContent = data.output || '';
+        const badge = document.getElementById('testOutputBadge');
+        const status = data.done ? (data.returncode === 0 ? 'pass' : 'fail') : 'running';
+        badge.className = 'badge ' + testBadgeClass(status);
+        badge.textContent = status;
+      }
+      if (data.done) {
+        st.status = data.returncode === 0 ? 'pass' : 'fail';
+        clearInterval(testPollTimers[name]);
+        refreshTests();
+      }
+    } catch (e) {
+      // keep trying on next tick
+    }
+  }, 1000);
+}
+
+function viewTestOutput(name) {
+  currentTestOutput = name;
+  document.getElementById('testOutputPanel').style.display = 'block';
+  document.getElementById('testOutputTitle').textContent = `test output — ${name}`;
+  const st = testState[name] || { status: 'idle' };
+  const badge = document.getElementById('testOutputBadge');
+  badge.className = 'badge ' + testBadgeClass(st.status);
+  badge.textContent = testBadgeLabel(st.status);
+  if (st.runId) {
+    fetch(`/api/tests/runs/${st.runId}`)
+      .then(r => r.json())
+      .then(data => { document.getElementById('testOutputBody').textContent = data.output || ''; });
+  } else {
+    document.getElementById('testOutputBody').textContent = '(not run yet in this session)';
+  }
+}
+
+function closeTestOutput() {
+  currentTestOutput = null;
+  document.getElementById('testOutputPanel').style.display = 'none';
+}
+
 refresh();
+refreshTests();
 refreshTimer = setInterval(refresh, 4000);
 </script>
 </body>

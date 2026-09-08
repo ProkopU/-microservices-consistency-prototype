@@ -19,8 +19,12 @@ Env vars:
 
 import json
 import os
+import re
 import subprocess
 import sys
+import threading
+import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -33,9 +37,18 @@ COMPOSE_DIR = os.environ.get(
     os.path.normpath(os.path.join(SCRIPT_DIR, "..", "docker-compose")),
 )
 COMPOSE_FILE = os.path.join(COMPOSE_DIR, "docker-compose.yml")
+TESTS_DIR = os.environ.get(
+    "TESTS_DIR",
+    os.path.normpath(os.path.join(SCRIPT_DIR, "..", "tests")),
+)
 
 STACK_ACTIONS = {"up", "down", "restart"}
 SERVICE_ACTIONS = {"start", "stop", "restart"}
+
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+RUNS_LOCK = threading.Lock()
+RUNS = {}  # run_id -> {"script": str, "output": str, "done": bool, "returncode": int|None, "started": float}
 
 
 def run_compose(args, timeout=120):
@@ -116,6 +129,51 @@ def all_services():
     return result, None
 
 
+def list_test_scripts():
+    if not os.path.isdir(TESTS_DIR):
+        return []
+    return sorted(f for f in os.listdir(TESTS_DIR) if f.endswith(".sh"))
+
+
+def start_test_run(script_name):
+    run_id = uuid.uuid4().hex[:12]
+    with RUNS_LOCK:
+        RUNS[run_id] = {
+            "script": script_name,
+            "output": "",
+            "done": False,
+            "returncode": None,
+            "started": time.time(),
+        }
+
+    def worker():
+        script_path = os.path.join(TESTS_DIR, script_name)
+        try:
+            proc = subprocess.Popen(
+                ["bash", script_path],
+                cwd=COMPOSE_DIR,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            for line in proc.stdout:
+                with RUNS_LOCK:
+                    RUNS[run_id]["output"] += ANSI_RE.sub("", line)
+            proc.wait()
+            with RUNS_LOCK:
+                RUNS[run_id]["returncode"] = proc.returncode
+                RUNS[run_id]["done"] = True
+        except Exception as e:
+            with RUNS_LOCK:
+                RUNS[run_id]["output"] += f"\n[control-panel] failed to run script: {e}\n"
+                RUNS[run_id]["returncode"] = -1
+                RUNS[run_id]["done"] = True
+
+    threading.Thread(target=worker, daemon=True).start()
+    return run_id
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "ControlPanel/1.0"
 
@@ -150,6 +208,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        parts = [p for p in path.split("/") if p]
 
         if path in ("/", "/index.html"):
             return self._send_file(os.path.join(SCRIPT_DIR, "index.html"), "text/html; charset=utf-8")
@@ -171,6 +230,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"error": f"unknown service '{name}'"}, 404)
             code, out, err2 = run_compose(["logs", "--no-color", "--tail", lines, name], timeout=30)
             return self._send_text(out + (("\n" + err2) if err2 else ""))
+
+        if path == "/api/tests":
+            return self._send_json({"scripts": list_test_scripts(), "tests_dir": TESTS_DIR})
+
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "tests" and parts[2] == "runs":
+            run_id = parts[3]
+            with RUNS_LOCK:
+                run = RUNS.get(run_id)
+                payload = dict(run) if run else None
+            if payload is None:
+                return self._send_json({"error": "unknown run_id"}, 404)
+            return self._send_json(payload)
 
         return self._send_json({"error": "not found"}, 404)
 
@@ -205,6 +276,13 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 code, out, err = run_compose(["restart", name], timeout=120)
             return self._send_json({"ok": code == 0, "stdout": out, "stderr": err})
+
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "tests" and parts[3] == "run":
+            name = parts[2]
+            if name not in list_test_scripts():
+                return self._send_json({"error": f"unknown test script '{name}'"}, 404)
+            run_id = start_test_run(name)
+            return self._send_json({"run_id": run_id})
 
         return self._send_json({"error": "not found"}, 404)
 
